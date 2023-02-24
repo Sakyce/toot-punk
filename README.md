@@ -8,3 +8,5 @@
 ```
 $ pip install bs4 mastodon.py requests pytube
 ```
+
+You'll need `wine` if you're on Linux.
