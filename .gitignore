@@ -1,2 +1,5 @@
 *.secret
 __pycache__
+temp
+*.mp4
+.vscode
