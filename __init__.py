@@ -25,15 +25,18 @@ class BaseRequest(ABC):
         requests_schedule.remove(self)
 
 class AutotuneRequest(BaseRequest):
-    def __init__(self, toot_video_url, youtube_url, status_to_reply, video_status) -> None:
-        self.toot_video_url = toot_video_url
+    toot_video_path:tuple[str, str]
+    youtube_url:str
+    
+    def __init__(self, toot_video:tuple[str, str], youtube_url:str, status_to_reply, video_status) -> None:
+        self.toot_video = toot_video
         self.youtube_url = youtube_url
         self.status_to_reply = status_to_reply
         self.video_status = video_status
     
     def treat(self):
-        videopath = vocoder.autotuneyt(self.toot_video_url, self.youtube_url)
-        media_post = client.media_post(getfiledata(videopath), 'video/mp4')
+        newvid = vocoder.autotuneyt(self.toot_video, self.youtube_url)
+        media_post = client.media_post(getfiledata(newvid), 'video/mp4')
         print('uploading to mastodon')
         sleep(10)
         ping = f"@{self.status_to_reply['account']['acct']}"
@@ -85,17 +88,22 @@ def check_notifications():
             try: video_status = client.status(notification.status.in_reply_to_id)
             except MastodonNotFoundError: 
                 print(notification.status)
-                requests_schedule.append(BadRequest('It looks like you are not replying to any status.', notification))
+                requests_schedule.append(BadRequest('''It looks like you are not replying to any status. 
+                It may happens because the video you want me to autotune have been posted too early, wait a bit and try again.''', notification))
                 continue
                 
-            video_url = None
+            vid = None
+            
             for attachment in video_status['media_attachments']:
                 if attachment['type'] == 'video':
-                    video_url = attachment['url']
+                    vid = vocoder.download_url(attachment['url'])
                     break
-            if not video_url:
-                requests_schedule.append(BadRequest('I can\'t find any video in the status you are replying too.', notification))
-                continue
+            if not vid: # try to download the yb video instead of the attachment
+                try: 
+                    vid = vocoder.downloadyt(BeautifulSoup(video_status.content, 'html.parser').text)
+                except Exception: 
+                    requests_schedule.append(BadRequest('I can\'t find any video in the status you are replying too.', notification))
+                    continue
 
             if not vocoder.exists(soup.text):
                 print(soup.text)
@@ -103,7 +111,7 @@ def check_notifications():
                 continue
 
             requests_schedule.append(
-                AutotuneRequest(video_url, soup.text, notification, video_status)
+                AutotuneRequest(vid, soup.text, notification, video_status)
             )
 
     if len(notifications) > 0:
@@ -145,14 +153,12 @@ def remove_all_toots():
         client.status_delete(status)
 
 def work():
-    wait_for_ratelimit()
     can_clear_notifications = check_notifications()
     treat_requests()
     if can_clear_notifications: client.notifications_clear()
     print(f'i still have {client.ratelimit_remaining} requests left')
-    pass
+    wait_for_ratelimit()
 
-wait_for_ratelimit()
 client.notifications_clear()
 while 1:
     work()

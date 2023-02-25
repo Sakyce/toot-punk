@@ -66,9 +66,9 @@ def autotune(base, over, output):
     run(['./bin/autotune.exe', '-b', '75', base, over, output], check=True)
     return output
 
-def autotuneyt(baselink, overurl):
+def autotuneyt(basepath:tuple[str, str], overurl):
     try:
-        path1, hash1 = download_url(baselink)
+        path1, hash1 = basepath
         path2, hash2 = downloadyt(overurl)
     except DownloadFailedException:
         return
