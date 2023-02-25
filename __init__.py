@@ -36,14 +36,19 @@ class AutotuneRequest(BaseRequest):
         media_post = client.media_post(getfiledata(videopath), 'video/mp4')
         print('uploading to mastodon')
         sleep(10)
+        ping = f"@{self.status_to_reply['account']['acct']}"
+        public_reaction = 'Also, *please set your autotune request in UNLISTED*!' if self.status_to_reply.status['visibility'] == 'public' else ''
         status = client.status_post(
-            'Here it is!! #autotune', 
+            ' '.join([ping, 'Here it is!!', public_reaction, '#autotune']) , 
             media_ids=media_post['id'], 
             sensitive=self.video_status['sensitive'],
-            in_reply_to_id=self.status_to_reply.status
-                           )
+            in_reply_to_id=self.status_to_reply.status,
+            spoiler_text=self.video_status['spoiler_text'],
+            visibility='unlisted' if self.video_status['sensitive'] else 'public'
+                )
         sleep(2)
-        client.status_reblog(status['id'])
+        if not self.video_status['sensitive']:
+            client.status_reblog(status['id'])
 
 
 class BadRequest(BaseRequest):
@@ -53,7 +58,8 @@ class BadRequest(BaseRequest):
     
     def treat(self):
         ping = f"@{self.status_to_reply['account']['acct']}"
-        client.status_post(' '.join([ping,  self.text]) , in_reply_to_id=self.status_to_reply.status)
+        public_reaction = 'Also, *please set your autotune request in UNLISTED*!' if self.status_to_reply.status['visibility'] == 'public' else ''
+        client.status_post(' '.join([ping,  self.text, public_reaction]), visibility='unlisted', in_reply_to_id=self.status_to_reply.status)
 
 requests_schedule:list[BaseRequest] = []
 
@@ -79,7 +85,7 @@ def check_notifications():
             try: video_status = client.status(notification.status.in_reply_to_id)
             except MastodonNotFoundError: 
                 print(notification.status)
-                requests_schedule.append(BadRequest('stop pinging me if you have no media for me to work on', notification))
+                requests_schedule.append(BadRequest('It looks like you are not replying to any status.', notification))
                 continue
                 
             video_url = None
@@ -88,12 +94,12 @@ def check_notifications():
                     video_url = attachment['url']
                     break
             if not video_url:
-                requests_schedule.append(BadRequest('there is no video for me to work on', notification))
+                requests_schedule.append(BadRequest('I can\'t find any video in the status you are replying too.', notification))
                 continue
 
             if not vocoder.exists(soup.text):
                 print(soup.text)
-                requests_schedule.append(BadRequest('i can\'t find the url to the youtube video', notification))
+                requests_schedule.append(BadRequest('I can\'t find the URL to the YouYube video in your reply, please give a valid YouTube URL', notification))
                 continue
 
             requests_schedule.append(
