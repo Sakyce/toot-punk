@@ -1,5 +1,5 @@
 from hashlib import blake2s
-from os import path, remove, mkdir
+from os import path, remove, mkdir, system
 from subprocess import run, check_output
 from pytube import YouTube
 from pytube.exceptions import RegexMatchError
@@ -59,7 +59,7 @@ def getlenght(path):
     return float(check_output(['./bin/ffprobe', '-hide_banner', '-loglevel', 'error', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', path]))
 
 def combine(video, sound, output):
-    run(['./bin/ffmpeg', '-hide_banner', '-loglevel', 'error', '-i', video, '-i', sound, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', output])
+    run(['./bin/ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', video, '-i', sound, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', output])
     return output
 
 def autotune(base, over, output):
@@ -70,8 +70,8 @@ def autotuneyt(basepath:tuple[str, str], overurl):
     try:
         path1, hash1 = basepath
         path2, hash2 = downloadyt(overurl)
-    except DownloadFailedException:
-        return
+    except DownloadFailedException as err:
+        raise err
 
     wav1 = convert(path1, 'temp/'+hash1+'.uncut.wav')
     wav2 = convert(path2, 'temp/'+hash2+'.uncut.wav')
@@ -91,6 +91,30 @@ def autotuneyt(basepath:tuple[str, str], overurl):
 
     return video
 
+def autotune_add_music(videopath:tuple[str, str], musicurl:str, silence=False):
+    'Add music instead of autotuning the video'
+    try:
+        original_video, hash1 = videopath
+        music_mp4_path, hash2 = downloadyt(musicurl)
+    except DownloadFailedException as err:
+        raise err
+    hash3 = blake2s((hash1 + hash2 + 'edit').encode(), digest_size=16).hexdigest()
+    
+    uncut_music = convert(music_mp4_path, 'temp/'+hash2+'.uncut.wav')
+    music = cut(uncut_music, 'temp/'+hash2+'.wav', getlenght(original_video))
+    video = combine(original_video, music, 'temp/'+hash3+'.mp4')
+
+    removefiles(uncut_music, music, original_video, music_mp4_path)
+
+    return video
+
 try: mkdir('temp')
 except: pass
 # autotuneyt('https://media.chitter.xyz/media_attachments/files/109/919/153/991/050/303/original/d0ec6787122979ec.mp4', 'https://youtu.be/Kze04Xo0ue0')
+
+
+# vidpath = autotune_add_music(
+#     download_url('https://media.chitter.xyz/media_attachments/files/109/919/153/991/050/303/original/d0ec6787122979ec.mp4'),
+#     'https://youtu.be/Kze04Xo0ue0'
+# )
+# system(f'.\\{vidpath}')
