@@ -1,9 +1,8 @@
 from hashlib import blake2s
 from os import path, remove, mkdir, system
 from subprocess import run, check_output
-from pytube import YouTube
-from pytube.exceptions import RegexMatchError
 from pathlib import Path
+from yt_dlp import YoutubeDL
 
 from requests import get
 
@@ -12,14 +11,6 @@ class DownloadFailedException(Exception): pass
 def removefiles(*files):
     for file in files:
         remove(file)
-
-def exists(url):
-    'check if there is a visible video url'
-    try: 
-        video = YouTube(url)
-        return True
-    except RegexMatchError: 
-        return False
 
 def download_url(url:str):
     r = get(url, allow_redirects=True)
@@ -31,21 +22,28 @@ def download_url(url:str):
 
 def downloadyt(url:str):
     hash = blake2s(url.encode(), digest_size=16).hexdigest()
+    filename = 'temp/'+hash+'.mp4'
 
     try:
-        with open('temp/'+hash+'.mp4', 'r'): pass
+        with open(filename, 'r'): pass
     except FileNotFoundError: 
-        video = YouTube(url).streams.filter(progressive=True, file_extension='mp4')\
-            .order_by('resolution') \
-            .asc()                  \
-            .first()                \
-        
-        if video:
-            return video.download('temp/', hash+'.mp4'), hash
+        opts = {
+            'extract_flat': 'discard_in_playlist',
+            'format_sort': ['ext'],
+            'fragment_retries': 10,
+            'ignoreerrors': 'only_download',
+            'postprocessors': [{'key': 'FFmpegConcat',
+                                'only_multi_video': True,
+                                'when': 'playlist'}],
+            'retries': 10,
+            'outtmpl': {'default': filename}
+        }
+        with YoutubeDL(opts) as ydl:
+            ydl.download([url])
 
+        return filename, hash
     else: 
-        return 'temp/'+hash+'.mp4', hash
-    raise Exception
+        return filename, hash
 
 def convert(input, output):
     run(['./bin/ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-ac', '1', output], check=True)

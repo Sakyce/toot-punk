@@ -6,7 +6,7 @@ Like [GanerCodes/AutotuneBot](https://github.com/GanerCodes/AutotuneBot) but for
 
 ### Dependencies
 ```
-$ pip install bs4 mastodon.py requests pytube
+$ pip install bs4 mastodon.py requests yt-dlp
 ```
 
 You'll need `wine` if you're on Linux.

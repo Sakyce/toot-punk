@@ -26,6 +26,24 @@ class BaseRequest(ABC):
 
     def destroy(self):
         requests_schedule.remove(self)
+        
+class BadRequest(BaseRequest):
+    def __init__(self, text, status_to_reply) -> None:
+        self.text = text
+        self.status_to_reply = status_to_reply
+    
+    def treat(self):
+        ping = f"@{self.status_to_reply['account']['acct']}"
+        # public_reaction = 'Also, *please set your autotune request in UNLISTED*!' if self.status_to_reply.status['visibility'] == 'public' else ''
+        client.status_post(' '.join([ping,  self.text]), visibility='unlisted', in_reply_to_id=self.status_to_reply.status)
+
+requests_schedule:list[BaseRequest] = []
+
+def getfiledata(filename): # 109921593256401643
+    file_data = None
+    with open(filename, 'rb') as file:
+        file_data = file.read()
+    return file_data
 
 def upload_video(video_path:str, original_status, notification, message:str):
     media_post = client.media_post(getfiledata(video_path), 'video/mp4')
@@ -57,8 +75,11 @@ class AutotuneRequest(BaseRequest):
         self.video_status = video_status
     
     def treat(self):
-        try: newvid = vocoder.autotuneyt(self.toot_video, self.youtube_url)
-        except Exception as err: print(err)
+        try:
+            newvid = vocoder.autotuneyt(self.toot_video, self.youtube_url)
+        except Exception as err: 
+            print(err)
+            requests_schedule.append(BadRequest(f'I couldn\'t treat your request, please report this issue on Github. ({str(err)})', self.notification))
         else:
             ping = f"@{self.notification['account']['acct']}"
             message = ' '.join([ping, 'Here it is!!', isPublic(self.notification.status), '#autotunebot'])
@@ -75,24 +96,16 @@ class VideoEditRequest(BaseRequest):
         self.video_status = video_status
     
     def treat(self):
+        ping = f"@{self.notification['account']['acct']}"
         try: newvid = vocoder.autotune_add_music(self.toot_video, self.youtube_url)
-        except Exception as err: print(err)
+        except Exception as err: 
+            print(err)
+            requests_schedule.append(BadRequest(f'I couldn\'t treat your request, please report this issue on Github. ({str(err)})', self.notification))
         else:
-            ping = f"@{self.notification['account']['acct']}"
             message = ' '.join([ping, 'Here\'s an edit with your music added!!', isPublic(self.notification.status), '#videoeditbot'])
             upload_video(newvid, self.video_status, self.notification, message)
 
-class BadRequest(BaseRequest):
-    def __init__(self, text, status_to_reply) -> None:
-        self.text = text
-        self.status_to_reply = status_to_reply
-    
-    def treat(self):
-        ping = f"@{self.status_to_reply['account']['acct']}"
-        public_reaction = 'Also, *please set your autotune request in UNLISTED*!' if self.status_to_reply.status['visibility'] == 'public' else ''
-        client.status_post(' '.join([ping,  self.text, public_reaction]), visibility='unlisted', in_reply_to_id=self.status_to_reply.status)
 
-requests_schedule:list[BaseRequest] = []
 
 def wait_for_ratelimit():
     'Yield until the bot can query again'
@@ -105,17 +118,30 @@ def wait_for_ratelimit():
             sleep(5)
         else: break
 
+def getYoutubeUrlInSoup(soup: BeautifulSoup):
+    links = soup.find_all('a', href=True)
+    youtube_links = [
+        link['href'] 
+        for link in links 
+        if any(youtube_variant in link['href'] for youtube_variant in ['youtube.com', 'youtu.be'])
+    ]
+    if len(youtube_links) == 0:
+        return None
+    return youtube_links[0]
+
 def check_notifications():
     'Check notifications and schedule the requests'
     notifications = client.notifications()
 
     for notification in notifications:
         if notification.type == 'mention':
+            print(notification)
             soup = BeautifulSoup(notification.status.content, 'html.parser') # c'est un html
 
             try: video_status = client.status(notification.status.in_reply_to_id)
             except MastodonNotFoundError: 
                 print(notification.status)
+                print("Isn't replying to any status")
                 requests_schedule.append(BadRequest('''It looks like you are not replying to any status. 
                 It may happens because the video you want me to autotune have been posted too early, wait a bit and try again.''', notification))
                 continue
@@ -126,6 +152,7 @@ def check_notifications():
                 requests_schedule.append(BadRequest('I\'m here to help!', notification))
                 continue
 
+            print("Trying to download the OP's video")
             for attachment in video_status['media_attachments']:
                 if attachment['type'] == 'video':
                     vid = vocoder.download_url(attachment['url'])
@@ -144,28 +171,23 @@ def check_notifications():
                     requests_schedule.append(BadRequest('I can\'t find any video in the status you are replying too.', notification))
                     continue
 
-            if not vocoder.exists(soup.text):
-                print(soup.text)
+            youtube_url = getYoutubeUrlInSoup(soup)
+            if not youtube_url:
                 requests_schedule.append(BadRequest('I can\'t find the URL to the YouYube video in your reply, please give a valid YouTube URL', notification))
                 continue
             
+            print("Adding request to schedule")
             if is_a_gif or ('&add' in soup.text):
                 requests_schedule.append(
-                    VideoEditRequest(vid, soup.text, notification, video_status)
+                    VideoEditRequest(vid, youtube_url, notification, video_status)
                 )
             else:
                 requests_schedule.append(
-                    AutotuneRequest(vid, soup.text, notification, video_status)
+                    AutotuneRequest(vid, youtube_url, notification, video_status)
                 )
 
     if len(notifications) > 0:
         return True # reduce the number of requests by one
-
-def getfiledata(filename): # 109921593256401643
-    file_data = None
-    with open(filename, 'rb') as file:
-        file_data = file.read()
-    return file_data
 
 def treat_requests():
     for request in requests_schedule:
